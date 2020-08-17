@@ -1,11 +1,11 @@
-Dataset,Type,Dtype,priority_type_field,call_type_field,unique_id,call_received,entered_to_cad,first_unit_assigned,first_unit_enroute,first_unit_onscene,first_unit_tohospital,first_unit_athospital,incident_closed
-boulder_fire_rescue_2015_2019.csv,Fire and Rescue ,,SEVERITY,CALLTYPE,MASTERINCIDENTNUMBER,TIMEPHONEPICKUP,,TIMEFIRSTUNITASSIGNED,TIMEFIRSTUNITENROUTE,TIMEFIRSTUNITARRIVED,,,TIMECALLCLOSED
-cambridge_cad_2019.csv,"Fire, Police, EMS",,priority,group,,,datetimereceived,,,,,,datetimeclosed
-cin_pd_2019.csv,Police,"{""priority"": ""float64""}",priority,incident_type_id,event_number,,create_time_incident,,dispatch_time_primary_unit,arrival_time_primary_unit,,,closed_time_incident
-detroit_pd_filtered_2019.csv,Police,"{""priority"": ""object""}",priority,category,incident_id,call_timestamp,intake_done_ts,,dispatch_complete_ts,travel_ended,,,on_scene_done
-no_pd_filtered_2019.csv,Police,,priority,typetext,nopd_item,,timecreate,,timedispatch,timearrive,,,timeclosed
-nyc_ems_2019.csv,EMS,,final_severity_level_code,final_call_type,cad_incident_id,,incident_datetime,first_assignment_datetime,first_activation_datetime,first_on_scene_datetime,first_to_hosp_datetime,first_hosp_arrival_datetime,incident_close_datetime
-nyc_fd_2018.csv,Fire,,highest_alarm_level,incident_classification_group,starfire_incident_id,,incident_datetime,first_assignment_datetime,first_activation_datetime,first_on_scene_datetime,,,incident_close_datetime
-richmond_pd_filtered_2014_2018.csv,Police,,priority,calltype,cfsid,,createdatetime,,dispatchtime,,,,closedatetime
-tempe_als_2018.csv,Advanced Life Support,,,,Inci_no,Disp_date,,Notif_date,Roll_date,Arv_date,,,Disp_date
-first_unit_priority_sf_fire_2019.csv,Fire and EMS,,Call Type Group,Number of Alarms,Call Number,Received DtTm,Entry DtTm,Dispatch DtTm,Response DtTm,On Scene DtTm,Transport DtTm,Hospital DtTm,Available DtTm
+Dataset,Estimated Population,Type,Dtype,priority_type_field,call_type_field,unique_id,call_received,entered_to_cad,first_unit_assigned,first_unit_enroute,first_unit_onscene,first_unit_tohospital,first_unit_athospital,incident_closed
+boulder_fire_rescue_2015_2019.csv,107353,Fire and Rescue ,,SEVERITY,CALLTYPE,MASTERINCIDENTNUMBER,TIMEPHONEPICKUP,,TIMEFIRSTUNITASSIGNED,TIMEFIRSTUNITENROUTE,TIMEFIRSTUNITARRIVED,,,TIMECALLCLOSED
+cambridge_cad_2019.csv,,"Fire, Police, EMS",,priority,group,,,datetimereceived,,,,,,datetimeclosed
+cin_pd_2019.csv,302605,Police,"{""priority"": ""float64""}",priority,incident_type_id,event_number,,create_time_incident,,dispatch_time_primary_unit,arrival_time_primary_unit,,,closed_time_incident
+detroit_pd_filtered_2019.csv,672662,Police,"{""priority"": ""object""}",priority,category,incident_id,call_timestamp,intake_done_ts,,dispatch_complete_ts,travel_ended,,,on_scene_done
+no_pd_filtered_2019.csv,391006,Police,,priority,typetext,nopd_item,,timecreate,,timedispatch,timearrive,,,timeclosed
+nyc_ems_2019.csv,8399000,EMS,,final_severity_level_code,final_call_type,cad_incident_id,,incident_datetime,first_assignment_datetime,first_activation_datetime,first_on_scene_datetime,first_to_hosp_datetime,first_hosp_arrival_datetime,incident_close_datetime
+nyc_fd_2018.csv,8399000,Fire,,highest_alarm_level,incident_classification_group,starfire_incident_id,,incident_datetime,first_assignment_datetime,first_activation_datetime,first_on_scene_datetime,,,incident_close_datetime
+richmond_pd_filtered_2014_2018.csv,110146,Police,,priority,calltype,cfsid,,createdatetime,,dispatchtime,arrivetime,,,closedatetime
+tempe_als_2018.csv,192364,Advanced Life Support,,,,Inci_no,Disp_date,,Notif_date,Roll_date,Arv_date,,,
+first_unit_priority_sf_fire_2019.csv,883305,Fire and EMS,,Number of Alarms,Call Type,Call Number,Received DtTm,Entry DtTm,Dispatch DtTm,Response DtTm,On Scene DtTm,Transport DtTm,Hospital DtTm,Available DtTm

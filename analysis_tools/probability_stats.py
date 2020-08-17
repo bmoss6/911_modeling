@@ -1,4 +1,5 @@
 from math import sqrt
+import math
 import csv
 import pandas as pd
 import dask.dataframe as dd
@@ -13,6 +14,9 @@ import scipy.signal as ss
 from statsmodels.stats.diagnostic import lilliefors
 from scipy import optimize
 from tqdm import tqdm_notebook
+from statsmodels.graphics.gofplots import ProbPlot
+import warnings
+from fitter import Fitter
 
 class Probability_Statistics():
     def __init__(self, data_name, data_path, data_map_path="/home/blakemoss/911_modeling/ts_data_map.csv"):
@@ -36,16 +40,296 @@ class Probability_Statistics():
         self.call_type_field = self.source_map['call_type_field']
         self.priority_type_field = self.source_map['priority_type_field']
         self.hour_ranges = []
-        for x in range(0,23):
-            range_ = ("{}:00".format(x), "{}:00".format(x+1))
+        for x in range(0,24):
+            range_ = ("{}:00".format(x), "{}:59".format(x))
             self.hour_ranges.append(range_)
-        self.hour_ranges.append(("23:00", "0:00"))
         if self.source_map['Dtype'] is not None:
             self.dtype = json.loads(self.source_map['Dtype'])
         else:
             self.dtype = None
         self.num_days = None
  
+
+    def pplot_fit_per_hour_interarrival(self):
+        worst = {"name":None, "expon":0, "weib":0, "vals":None}
+        best = {"name":None, "expon":math.inf, "weib":math.inf, "vals":None}
+        expon_reject_obj = {"Dataset":self.name}
+        weibull_reject_obj = {"Dataset":self.name}
+        expon_reject_obj_2 = {"Dataset":self.name}
+        weibull_reject_obj_2 = {"Dataset":self.name}
+        f_test_reject_obj = {"Dataset":self.name}
+        better_obj = {"Dataset":self.name}
+        event_stats = {x:[] for x in self.event_names}
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df = df.sort_values(by=mapped_name,ascending=True)
+                df.index = df[mapped_name]
+                df['inter_arrival'] = (df[mapped_name]-df[mapped_name].shift()).dt.seconds.fillna(np.float64(0))
+                zero_inter_arrival = df[df['inter_arrival']==0].index
+                df.drop(zero_inter_arrival, inplace=True)
+                expon_reject = 0
+                weib_reject = 0
+                expon_reject_2 = 0 
+                weib_reject_2 = 0
+                weib_stats = []
+                expon_stats = []
+                beta_stats = []
+                f_reject = 0
+                pvals = []
+                for x in self.hour_ranges:
+                    print("{}-{}-{}".format(self.name, event_name, x))
+                    hour_slice = df.between_time(*x)  
+                    total_counts = hour_slice['inter_arrival'].values
+                    ###################
+                    args = st.expon.fit(total_counts, floc=0)
+                    e = st.expon(*args)
+                    edges = []
+                    r = [x/20 for x in range(1,20)]
+                    edges = e.ppf(r) 
+                    edges = np.insert(edges,0,0)
+                    edges = np.append(edges,max(total_counts))
+                    histo, bin_edges = np.histogram(total_counts, bins=edges, density=False)
+                    cdf = st.expon.cdf(bin_edges, *args)
+                    expected_values = len(total_counts) * np.diff(cdf)
+                    expon_chi_stat, expon_pval = st.chisquare(histo, f_exp=expected_values, ddof=2)
+                    event_stats[event_name].append(expon_chi_stat)
+                    expon_stats.append(expon_chi_stat)
+                    ########################
+                    fig, ax = plt.subplots(1,2)
+                    histo, bin_edges,_ = ax[0].hist(total_counts, bins=100, density=False)
+                    cdf = st.expon.cdf(bin_edges, *args)
+                    expected_values = len(total_counts) * np.diff(cdf)
+                    ax[0].plot(bin_edges[:-1], expected_values, label="Exponential Fit")
+                    ax[0].set_xlabel("Inter-arrival Times (Seconds)")
+                    ax[0].set_ylabel("Frequency")
+                    ax[0].legend() 
+                    prob = ProbPlot(total_counts, st.expon, loc=args[0], scale=args[1])
+                    prob.qqplot(ax=ax[1], line='45')
+                    #ax[1].set_title("Exponential QQ Plot")
+                    plt.tight_layout()
+                    plt.show()
+                    ##### Compare Weibull_Min
+                    args = st.weibull_min.fit(total_counts, floc=0)
+                    e = st.weibull_min(*args)
+                    edges = []
+                    r = [x/20 for x in range(1,20)]
+                    edges = e.ppf(r) 
+                    edges = np.insert(edges,0,0)
+                    edges = np.append(edges,max(total_counts))
+                    histo, bin_edges = np.histogram(total_counts, bins=edges, density=False)
+                    cdf = st.weibull_min.cdf(bin_edges, *args)
+                    expected_values = len(total_counts) * np.diff(cdf)
+                    weib_chi_stat, weib_pval = st.chisquare(histo, f_exp=expected_values, ddof=4)
+                    weib_stats.append(weib_chi_stat)
+
+                    ##### Compare Beta 
+                    
+                    np.seterr(divide='raise')
+                   # total_counts = total_counts.astype(np.float64)
+                   # print(np.unique(total_counts))
+                   # args = st.betaprime.fit(total_counts)
+                   # e = st.betaprime(*args)
+                   # edges = []
+                   # r = [x/20 for x in range(1,20)]
+                   # edges = e.ppf(r) 
+                   # edges = np.insert(edges,0,0)
+                   # edges = np.append(edges,max(total_counts))
+                   # histo, bin_edges = np.histogram(total_counts, bins=edges, density=False)
+                   # cdf = st.betaprime.cdf(bin_edges, *args)
+                   # expected_values = len(total_counts) * np.diff(cdf)
+                   # beta_chi_stat, beta_pval = st.chisquare(histo, f_exp=expected_values, ddof=4)
+                   # beta_stats.append(beta_chi_stat)
+    
+                    f_res = self.f_test(total_counts)
+                    if f_res == 1:
+                        f_reject += 1
+                    if expon_chi_stat > weib_chi_stat:
+                        bet = (expon_chi_stat - weib_chi_stat)/expon_chi_stat
+                        #print("Exponential Weibull {} better chi squared".format(bet)) 
+                    #ax[0].plot(bin_edges[:-1], expected_values, label="Exponential Fit")
+                    #ax[0].legend() 
+                    comp = 27.204
+                    comp_2 = 30.144
+                    if expon_chi_stat > comp:
+                        expon_reject += 1
+                    if expon_chi_stat > comp_2:
+                        expon_reject_2 += 1
+                    if weib_chi_stat > comp:
+                        weib_reject += 1
+                    if weib_chi_stat > comp_2:
+                        weib_reject_2 += 1
+                    if expon_chi_stat > worst["expon"]:
+                        worst["name"] = "{}-{}-{}".format(self.name, event_name, x)
+                        worst["expon"] = expon_chi_stat
+                        worst["weib"] = weib_chi_stat
+                        worst["vals"] = total_counts
+                    if expon_chi_stat < best["expon"]:
+                        best["name"] = "{}-{}-{}".format(self.name, event_name, x)
+                        best["expon"] = expon_chi_stat
+                        best["weib"] = weib_chi_stat
+                        best["vals"] = total_counts
+                print("Expon: {}-{}: Reject at .10 :{}, Reject .05:{}, f_reject: {},  mean:{}".format(self.name, event_name, expon_reject, expon_reject_2,f_reject, np.mean(expon_stats)))
+                print("Weib: {}-{}: Reject at .10:{}, Reject .05:{}, mean:{}".format(self.name, event_name, weib_reject, weib_reject_2, np.mean(weib_stats)))
+                bet = (np.mean(weib_stats)-np.mean(expon_stats))/np.mean(expon_stats)
+                #bet_2 = (np.mean(beta_stats)-np.mean(weib_stats))/np.mean(weib_stats)
+                print("Weib is {}% change from expon chi stat: {}-{}".format(100*bet, self.name,event_name))
+                #print("beta is {}% change from weib chi stat: {}-{}".format(100*bet_2, self.name,event_name))
+                expon_reject_obj_2[event_name] = expon_reject_2 
+                weibull_reject_obj_2[event_name] = weib_reject_2
+                expon_reject_obj[event_name] = expon_reject
+                weibull_reject_obj[event_name] = weib_reject 
+                f_test_reject_obj[event_name] = f_reject
+                better_obj[event_name] = bet
+#        self.write_stats("better", better_obj)
+#        self.write_stats("f_reject", f_test_reject_obj)
+#        self.write_stats("expon_reject_10", expon_reject_obj)
+#        self.write_stats("weibull_reject_10", weibull_reject_obj)
+#        self.write_stats("expon_reject_05", expon_reject_obj_2)
+#        self.write_stats("weibull_reject_05", weibull_reject_obj_2)
+        print("Worst")
+        fig1, ax1 = plt.subplots()
+        fig, ax = plt.subplots(1,2)
+        args = st.expon.fit(worst["vals"], floc=0)
+        wargs = st.weibull_min.fit(worst["vals"], floc=0)
+        histo, bin_edges,_ = ax1.hist(worst["vals"], bins=100, density=False)
+        prob = ProbPlot(worst["vals"], st.expon, loc=args[0], scale=args[1])
+        wprob = ProbPlot(worst["vals"], st.weibull_min, distargs=(wargs[0],), loc=wargs[1], scale=wargs[2])
+        prob.qqplot(ax=ax[0], line='45')
+        wprob.qqplot(ax=ax[1], line='45')
+        ax[1].set_title("Weibull QQ Plot")
+        ax[0].set_title("Exponential QQ Plot")
+        cdf = st.expon.cdf(bin_edges, *args)
+        expected_values = len(worst["vals"]) * np.diff(cdf)
+        wcdf = st.weibull_min.cdf(bin_edges, *wargs)
+        wexpected_values = len(worst["vals"]) * np.diff(wcdf)
+        print("{}-{}/{}".format(worst["name"],worst["expon"],worst["weib"]))
+        ax1.set_xlabel("Inter-arrival Times (Seconds)")
+        ax1.set_ylabel("Frequency")
+        ax1.plot(bin_edges[:-1], expected_values, label="Exponential Fit")
+        ax1.plot(bin_edges[:-1], wexpected_values, label="Weibull Fit")
+        ax1.legend() 
+        plt.tight_layout()
+        plt.show()
+#
+        print("Best")
+        fig1, ax1 = plt.subplots()
+        fig, ax = plt.subplots(1,2)
+        args = st.expon.fit(best["vals"], floc=0)
+        wargs = st.weibull_min.fit(best["vals"], floc=0)
+        histo, bin_edges,_ = ax1.hist(best["vals"], bins=100, density=False)
+        prob = ProbPlot(best["vals"], st.expon, loc=args[0], scale=args[1])
+        wprob = ProbPlot(best["vals"], st.weibull_min, distargs=(wargs[0],), loc=wargs[1], scale=wargs[2])
+        prob.qqplot(ax=ax[0], line='r')
+        wprob.qqplot(ax=ax[1], line='r')
+        ax[1].set_title("Weibull QQ Plot")
+        ax[0].set_title("Exponential QQ Plot")
+        cdf = st.expon.cdf(bin_edges, *args)
+        expected_values = len(best["vals"]) * np.diff(cdf)
+        wcdf = st.weibull_min.cdf(bin_edges, *wargs)
+        wexpected_values = len(best["vals"]) * np.diff(wcdf)
+        print("{}-{}/{}".format(best["name"],best["expon"],best["weib"]))
+        ax1.set_xlabel("Inter-arrival Times (Seconds)")
+        ax1.set_ylabel("Frequency")
+        ax1.plot(bin_edges[:-1], expected_values, label="Exponential Fit")
+        ax1.plot(bin_edges[:-1], wexpected_values, label="Weibull Fit")
+        ax1.legend() 
+        plt.tight_layout()
+        plt.show()
+        return worst, best, event_stats
+
+
+
+    def f_test(self, vals, alpha=.05):
+    #    np.random.seed(1)
+        np.random.shuffle(vals)
+        n = len(vals)
+        r = int(n/2)
+        df_n = 2*r
+        df_d = 2*(n-r)
+        group_1 = vals[:r]
+        group_2 = vals[r:]
+        f = (sum(group_1)/len(group_1))/(sum(group_2)/len(group_2))
+        t_alph = alpha/2
+        stat = st.f(df_n,df_d)
+        upper = stat.ppf(q=1-t_alph)
+        lower = stat.ppf(q=t_alph)
+        if f < lower:
+            return 1
+        if f > upper:
+            return 1
+        else:
+            return 0
+
+
+    def exponential_fit_per_hour_interarrival_chi(self):
+        worst = ["X",0]
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df = df.sort_values(by=mapped_name,ascending=True)
+                df.index = df[mapped_name]
+                df['inter_arrival'] = (df[mapped_name]-df[mapped_name].shift()).dt.seconds.fillna(np.float64(0))
+                zero_inter_arrival = df[df['inter_arrival']==0].index
+                df.drop(zero_inter_arrival, inplace=True)
+                reject = 0
+                not_reject = 0
+                pvals = []
+                for x in self.hour_ranges:
+                    #fig, ax = plt.subplots()
+                    #print("{} Histogram of Interarrival times for event {} between hours {}".format(self.name, event_name, x)) 
+                    #ax.set_xlabel("Interarrival Time (Seconds)")
+                    #ax.set_ylabel("Frequency")
+                    hour_slice = df.between_time(*x)  
+                    total_counts = hour_slice['inter_arrival'].values
+                    edges = []
+                    for j in range(1,20):
+                        edges.append(-1* args[1] * math.log(1-j/20))
+                     
+                    edges.append(max(total_counts))
+                    histo, bin_edges= np.histogram(total_counts, bins=edges, density=False)
+                    res = self.test_chi_squared(hist0, bin_edges, total_counts) 
+#                    ks, pval = lilliefors(total_counts, dist='exp', pvalmethod='table') 
+                    print(res)
+                    args = dist.fit(count, floc=0)
+                    cdf = dist.cdf(bin_edges, *args)
+                    expected_values = len(count) * np.diff(cdf)
+                    chi_stat, pval = st.chisquare(histo, f_exp=expected_values, ddof=len(args))
+                    #ax.plot(bin_edges[:-1], expected_values, label="Exponential Fit")
+                    #ax.legend()
+                    comp = 27.204
+                    #comp = 30.144
+                    
+                    #comp = 36.191
+
+                print(event_name)
+                print("Not Reject:{}, Reject:{}".format(not_reject, reject))
+                print("--------------------------------------------------------------------")
+        return pvals, worst
+
+    def test_chi_squared(self, histo, bin_edges, count ):
+        dists = {"Exponential": st.expon, "Gamma":st.gamma, "Erlang": st.erlang, "ExponWeibull":st.exponweib}
+        best_pval = 0
+        best_dist = None 
+        for dist_name, dist in dists.items(): 
+            args = dist.fit(count, floc=0)
+            cdf = dist.cdf(bin_edges, *args)
+            expected_values = len(count) * np.diff(cdf)
+            chi_stat, pval = st.chisquare(histo, f_exp=expected_values, ddof=len(args))
+            if pval > best_pval:
+                best_pval = pval
+                best_dist = {dist_name:(chi_stat,best_pval)}
+        return best_dist 
 
     def exponential_fit_per_hour_interarrival(self):
         hour_stats = {event_name:"Not Recorded" for event_name in self.event_names}
@@ -68,27 +352,40 @@ class Probability_Statistics():
                 print("--------------------------------------------------------------------")
                 dists = {"Exponential": 0, "Lomax":0, "Pareto": 0, "ExponWeibull":0, "Beta":0}
                 for x in self.hour_ranges:
-                    #fig, ax = plt.subplots()
+                    fig, ax = plt.subplots()
+
+                    print("{} Histogram of Interarrival times for event {} between hours {}".format(self.name, event_name, x)) 
+                    ax.set_xlabel("Interarrival Time (Seconds)")
+                    ax.set_ylabel("Frequency")
                     hour_slice = df.between_time(*x)  
                     total_counts = hour_slice['inter_arrival'].values
-                    #histo, bin_edges, patches = ax.hist(total_counts, bins=100, density=False)
-                    #args = st.expon.fit(total_counts)
-                    #cdf = st.expon.cdf(bin_edges, *args)
-                    #expected_values = len(total_counts) * np.diff(cdf)
-                    #ax.plot(bin_edges[:-1], expected_values)
-                    ks, pval = lilliefors(total_counts, dist='exp', pvalmethod='table') 
-                    if pval < .05:
-                        #print("{}:{} -> Not from exponential".format(event_name, x))                    
-                        reject += 1
-                    else:
-                        #print("{}:{} -> From exponential".format(event_name, x))                    
-                        not_reject += 1
-                    res = self.test_chi_squared(total_counts)
-                    if res is not None:
-                        dists[list(res.keys())[0]] += 1
-                print("{}: {} Not reject, {} reject".format(event_name, not_reject, reject))
-                print(sorted(dists.items(), key=lambda x: x[1]))
-                print("--------------------------------------------------------------------")
+                    histo, bin_edges, patches = ax.hist(total_counts, bins=100, density=False)
+                    plt.show()
+                   # args = st.expon.fit(total_counts)
+                   # cdf = st.expon.cdf(bin_edges, *args)
+                   # expected_values = len(total_counts) * np.diff(cdf)
+                   # #largs = st.lomax.fit(total_counts)
+                   # #lcdf = st.lomax.cdf(bin_edges, *largs)
+                   # #lexpected_values = len(total_counts) * np.diff(lcdf)
+                   # ks, pval = lilliefors(total_counts, dist='exp', pvalmethod='table') 
+                   # if pval < .05:
+                   #     #print("{}:{} -> Not from exponential".format(event_name, x))                    
+                   #     reject += 1
+                   #     note_ = "Killifors Test Rejected"
+                   # else:
+                   #     #print("{}:{} -> From exponential".format(event_name, x))                    
+                   #     not_reject += 1
+                   #     note_ = "Killifors Test Did not Reject"
+                   # ax.plot(bin_edges[:-1], expected_values, label="Exponential Fit ({})".format(note_))
+                   # ax.legend()
+                   # #ax.plot(bin_edges[:-1], lexpected_values, label="Lomax Fit")
+                   # #ax.legend()
+                   # #res = self.test_chi_squared(total_counts)
+                   # #if res is not None:
+                   # #    dists[list(res.keys())[0]] += 1
+                #print("{}: {} Not reject, {} reject".format(event_name, not_reject, reject))
+                #print(sorted(dists.items(), key=lambda x: x[1]))
+                #print("--------------------------------------------------------------------")
 
     def exponential_fit_per_hour_interval(self):
 #        hour_stats = {event_name:"Not Recorded" for event_name in self.event_names}
@@ -146,22 +443,147 @@ class Probability_Statistics():
                 #print(sorted(dists.items(), key=lambda x: x[1]))
                 print("--------------------------------------------------------------------")
 
-    def test_chi_squared(self, count):
-        histo, bin_edges = np.histogram(count, bins=100, density=False)
-        dists = {"Exponential": st.expon, "Lomax":st.lomax, "Pareto": st.pareto, "Beata": st.beta, "ExponWeibull":st.exponweib}
-        best_pval = 0
-        best_dist = None 
-        for dist_name, dist in dists.items(): 
-            args = dist.fit(count)
-            cdf = dist.cdf(bin_edges, *args)
-            expected_values = len(count) * np.diff(cdf)
-            chi_stat, pval = st.chisquare(histo, f_exp=expected_values, ddof=len(args))
-            if pval > best_pval:
-                best_pval = pval
-                best_dist = {dist_name:(chi_stat,best_pval)}
-        return best_dist 
 
 
+    def best_fit_overall_interarrival(self):
+        hour_stats = {event_name:"Not Recorded" for event_name in self.event_names}
+        min_stats = {event_name:"Not Recorded" for event_name in self.event_names}
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df = df.sort_values(by=mapped_name,ascending=True)
+                df.index = df[mapped_name]
+                df['inter_arrival'] = (df[mapped_name]-df[mapped_name].shift()).dt.seconds.fillna(np.float64(0))
+                zero_inter_arrival = df[df['inter_arrival']==0].index
+                df.drop(zero_inter_arrival, inplace=True)
+                data = df['inter_arrival'].values
+                self.best_fit_all_continuous(data)
 
-    def write_statistics(self, stats_file="/home/blakemoss/911_modeling/stationary_stats.csv"):
-        pass
+    def exponential_fit_per_hour_interval(self):
+#        hour_stats = {event_name:"Not Recorded" for event_name in self.event_names}
+#        min_stats = {event_name:"Not Recorded" for event_name in self.event_names}
+        interval_stats = {"{}-{}".format(start, end):"Not Recorded" for start, end in self.intervals}
+        for start_event, end_event in tqdm_notebook(self.intervals):
+            start_mapped_name = self.source_map[start_event]
+            end_mapped_name = self.source_map[end_event]
+            if start_mapped_name is not None and end_mapped_name is not None:
+                all_columns = [self.unique_id, start_mapped_name, end_mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[start_mapped_name] = pd.to_datetime(df[start_mapped_name], errors="coerce", infer_datetime_format=True)
+                df[end_mapped_name] = pd.to_datetime(df[end_mapped_name], errors="coerce", infer_datetime_format=True)
+                df.index = df[start_mapped_name]
+                df['delta'] = (df[end_mapped_name]-df[start_mapped_name]).dt.seconds.fillna(np.float64(0))
+                zero_interval = df[df['delta']==0].index
+                df.drop(zero_interval, inplace=True)
+                data = df['delta'].values
+                self.best_fit_all_continuous(data)
+
+    def best_fit_all_continuous(self, data):
+            # Distributions to check
+        all_cd = [        
+                        st.alpha,st.anglit,st.arcsine,st.beta,st.betaprime,st.bradford,st.burr,st.cauchy,st.chi,st.chi2,st.cosine,
+                        st.dgamma,st.dweibull,st.erlang,st.expon,st.exponnorm,st.exponweib,st.exponpow,st.f,st.fatiguelife,st.fisk,
+                        st.foldcauchy,st.foldnorm,st.frechet_r,st.frechet_l,st.genlogistic,st.genpareto,st.gennorm,st.genexpon,
+                        st.genextreme,st.gausshyper,st.gamma,st.gengamma,st.genhalflogistic,st.gilbrat,st.gompertz,st.gumbel_r,
+                        st.gumbel_l,st.halfcauchy,st.halflogistic,st.halfnorm,st.halfgennorm,st.hypsecant,st.invgamma,st.invgauss,
+                        st.invweibull,st.johnsonsb,st.johnsonsu,st.ksone,st.kstwobign,st.laplace,st.levy,st.levy_l,st.levy_stable,
+                        st.logistic,st.loggamma,st.loglaplace,st.lognorm,st.lomax,st.maxwell,st.mielke,st.nakagami,st.ncx2,st.ncf,
+                        st.nct,st.norm,st.pareto,st.pearson3,st.powerlaw,st.powerlognorm,st.powernorm,st.rdist,st.reciprocal,
+                        st.rayleigh,st.rice,st.recipinvgauss,st.semicircular,st.t,st.triang,st.truncexpon,st.truncnorm,st.tukeylambda,
+                        st.uniform,st.vonmises,st.vonmises_line,st.wald,st.weibull_min,st.weibull_max,st.wrapcauchy
+                        ]
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            dists = [x.name for x in all_cd]
+            f = Fitter(data, distributions=dists)
+            f.fit()
+            f.summary() 
+
+    def get_arrival_process_stats(self):
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df.index = df[mapped_name]
+                hour_groups = df.groupby([df.index.year, df.index.month, df.index.day, df.index.hour])
+                rec = {x:[] for x in range(0,24)}
+                for name, group in hour_groups:
+                    x = name[3]
+                    c = group[self.unique_id].count()
+                    rec[x].append(c)
+                lex = [np.var(rec[x])/np.mean(rec[x]) for x in range(0,24)]
+                print(event_name)
+                print(np.mean(lex), np.var(lex))
+
+    def get_interarrival_stats(self):
+        cof_v = {event_name:"Not Recorded" for event_name in self.event_names}
+
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df = df.sort_values(by=mapped_name,ascending=True)
+                df.index = df[mapped_name]
+                df['inter_arrival'] = (df[mapped_name]-df[mapped_name].shift()).dt.seconds.fillna(np.float64(0))
+                zero_inter_arrival = df[df['inter_arrival']==0].index
+                df.drop(zero_inter_arrival, inplace=True)
+                cof_var = []
+                for x in self.hour_ranges:
+                    hour_slice = df.between_time(*x)  
+                    total_counts = hour_slice['inter_arrival'].values
+                    var = st.variation(total_counts)
+                    cof_var.append(var)
+                cof_v[event_name] = (np.mean(cof_var), np.var(cof_var))                
+        return cof_v 
+
+    def get_interarrival_stats_skew(self):
+        skew_v = {event_name:"Not Recorded" for event_name in self.event_names}
+
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df = df.sort_values(by=mapped_name,ascending=True)
+                df.index = df[mapped_name]
+                df['inter_arrival'] = (df[mapped_name]-df[mapped_name].shift()).dt.seconds.fillna(np.float64(0))
+                zero_inter_arrival = df[df['inter_arrival']==0].index
+                df.drop(zero_inter_arrival, inplace=True)
+                sk = []
+                for x in self.hour_ranges:
+                    hour_slice = df.between_time(*x)  
+                    total_counts = hour_slice['inter_arrival'].values
+                    s = st.skew(total_counts)
+                    sk.append(s)
+                skew_v[event_name] = (np.mean(sk), np.var(sk))                
+        return skew_v 
+
+    def write_stats(self, stats_file, obj):
+        stats_file = "/home/blakemoss/911_modeling/{}.csv".format(stats_file)
+        flag = os.path.exists(stats_file)
+        with open(stats_file, "a+", newline='') as csvfile:
+            fieldnames = self.event_names.copy()
+            fieldnames.insert(0,"Dataset")
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            if flag is False:
+                writer.writeheader()
+            writer.writerow(obj)
+

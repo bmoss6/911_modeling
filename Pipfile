@@ -1,0 +1,35 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+
+[packages]
+numpy = "*"
+pandas = "*"
+sklearn = "*"
+flask-googlemaps = "*"
+jinja2 = "*"
+flask = "*"
+shapely = "*"
+geopandas = "*"
+geojsonio = "*"
+branca = "*"
+requests = "*"
+folium = "*"
+scipy = "*"
+geojson = "*"
+tqdm = "*"
+simpy = "*"
+dask = {extras = ["dataframe"],version = "*"}
+distributed = "*"
+sodapy = "*"
+arcgis = "*"
+kml2geojson = "*"
+xlrd = "*"
+statsmodels = "*"
+fitter = "*"
+
+[requires]
+python_version = "3.6"

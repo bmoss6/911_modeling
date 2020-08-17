@@ -33,10 +33,9 @@ class Stationary_Statistics():
         self.call_type_field = self.source_map['call_type_field']
         self.priority_type_field = self.source_map['priority_type_field']
         self.hour_ranges = []
-        for x in range(0,23):
-            range_ = ("{}:00".format(x), "{}:00".format(x+1))
+        for x in range(0,24):
+            range_ = ("{}:00".format(x), "{}:59".format(x))
             self.hour_ranges.append(range_)
-        self.hour_ranges.append(("23:00", "0:00"))
         if self.source_map['Dtype'] is not None:
             self.dtype = json.loads(self.source_map['Dtype'])
         else:
@@ -93,12 +92,41 @@ class Stationary_Statistics():
                 df = df.compute()
                 df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
                 df.index = df[mapped_name]
-                total_counts = df.groupby([df.index.year, df.index.month, df.index.day, df.index.hour])[self.unique_id].count().values
-                plot_acf(total_counts, lags=24)
-                for x in self.hour_ranges:
-                    hour_slice = df.between_time(*x)  
-                    total_counts = hour_slice.groupby([hour_slice.index.year, hour_slice.index.month, hour_slice.index.day, hour_slice.                                                       index.hour])[self.unique_id].count().values
-                    plot_acf(total_counts, lags=60, title="{}:{}".format(event_name, x))
+                total_counts = df.groupby([df.index.year, df.index.month, df.index.day, df.index.hour, df.index.minute])[self.unique_id].count().values
+                print(self.name, event_name)
+                fig, ax = plt.subplots()
+                plot_acf(total_counts, ax=ax,title="", lags=60)
+                ax.set_ylabel("Autocorrelation Coefficient")
+                ax.set_xlabel("Lag")
+                plt.show()
+                #for x in self.hour_ranges:
+                #    hour_slice = df.between_time(*x)  
+                #    total_counts = hour_slice.groupby([hour_slice.index.year, hour_slice.index.month, hour_slice.index.day, hour_slice.                                                       index.hour])[self.unique_id].count().values
+                #    plot_acf(total_counts, lags=60, title="{} Hourly Autocorrelation Event Counts {}:{}".format(self.name, event_name, x))
+
+    def auto_correlation_compare(self):
+        all_min = []
+        all_hour = []
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df.index = df[mapped_name]
+                total_min = df.groupby([df.index.year, df.index.month, df.index.day, df.index.hour, df.index.minute])[self.unique_id].count().values
+                total_hour = df.groupby([df.index.year, df.index.month, df.index.day, df.index.hour])[self.unique_id].count().values
+                print(self.name, event_name)
+                acs_min = acf(total_min, fft=False, nlags=60)
+                acs_hour = acf(total_hour, fft=False, nlags=24)
+                mean_acs_min = np.mean(acs_min)
+                mean_acs_hour = np.mean(acs_hour)
+                all_min.append(mean_acs_min)
+                all_hour.append(mean_acs_hour)
+
+        return np.mean(all_min), np.min(all_hour)
 
     def auto_correlation_interarrival(self):
         hour_stats = {event_name:"Not Recorded" for event_name in self.event_names}
@@ -159,6 +187,7 @@ class Stationary_Statistics():
                     avg.append(np.mean(t[1:]))
                 print("Hourly Avg")
                 print(np.mean(avg))
+
     def calculate_avg_arrival_rates_per_hour(self):
         hour_stats = {event_name:"Not Recorded" for event_name in self.event_names}
         for event_name in tqdm_notebook(self.event_names):
@@ -208,6 +237,88 @@ class Stationary_Statistics():
 
         return hour_stats 
 
+    def show_number_of_arrivals_per_minute_graph(self):
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df.index = df[mapped_name]
+                total_counts = df.groupby([df.index.year, df.index.month, df.index.day, df.index.hour, df.index.minute])[self.unique_id].count().values
+                fig, ax = plt.subplots()
+                x = np.linspace(0, len(total_counts), len(total_counts))
+                ax.plot(x, total_counts)   
 
-    def write_statistics(self, stats_file="/home/blakemoss/911_modeling/stationary_stats.csv"):
-        pass
+    def show_number_of_arrivals_per_hour_graph(self):
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df.index = df[mapped_name]
+                total_counts = df.groupby([df.index.year, df.index.month, df.index.day, df.index.hour])[self.unique_id].count().values
+                fig, ax = plt.subplots()
+                x = np.linspace(0, len(total_counts), len(total_counts))
+                ax.plot(x, total_counts)   
+
+    def show_avg_number_of_arrivals_per_hour_graph(self):
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df.index = df[mapped_name]
+                hour_groups = df.groupby([df.index.year, df.index.month, df.index.day, df.index.hour])
+                rec = {x:{"total":0, "obvs":0} for x in range(0,24)}
+                for name, group in hour_groups:
+                    x = name[3]
+                    rec[x]["total"] += group[self.unique_id].count()
+                    rec[x]["obvs"] += 1
+                
+                means = [rec[x]["total"]/rec[x]["obvs"] for x in range(0,24)]
+                x = [x for x in range(0,24)]
+                fig, ax = plt.subplots()
+                print(self.name, event_name)
+                print("Min Hour")
+                print(np.argmin(means))
+                print("Max Hour")
+                print(np.argmax(means)) 
+                ax.plot(x,means)
+                ax.set_xlabel("Hours (0-23)")
+                ax.set_ylabel("Average Event Count")
+                plt.show()
+                     
+    def show_avg_number_of_arrivals_per_minute_graph(self):
+        for event_name in tqdm_notebook(self.event_names):
+            mapped_name = self.source_map[event_name]
+            if mapped_name is not None:
+                all_columns = [self.unique_id, mapped_name]
+                df = dd.read_csv(self.data_path, usecols=all_columns)
+                df = df.dropna()
+                df = df.compute()
+                df[mapped_name] = pd.to_datetime(df[mapped_name], errors="coerce", infer_datetime_format=True)
+                df.index = df[mapped_name]
+                minute_groups = df.groupby([df.index.year, df.index.month, df.index.day, df.index.hour, df.index.minute])
+                rec = {x:{"total":0, "obvs":0} for x in range(0,60)}
+                for name, group in minute_groups:
+                    x = name[4]
+                    rec[x]["total"] += group[self.unique_id].count()
+                    rec[x]["obvs"] += 1
+                
+                means = [rec[x]["total"]/rec[x]["obvs"] for x in range(0,60)]
+                x = [x for x in range(0,60)]
+                fig, ax = plt.subplots()
+                print(self.name, event_name)
+                ax.plot(x,means) 
+                ax.set_xlabel("Minutes (0-59)")
+                ax.set_ylabel("Average Event Count")
+                plt.show()

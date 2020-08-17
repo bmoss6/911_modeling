@@ -1,0 +1,8 @@
+sf_data/sf_data_parts/*
+no_data/*.csv
+data_retrieval/*/*
+data_retrieval/*
+datasets/*
+data_processing/*.csv
+sf_data/*
+*.csv

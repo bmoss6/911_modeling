@@ -15,7 +15,7 @@ class Summary_Statistics():
         self.intervals = [("call_received", "entered_to_cad"), ("entered_to_cad", "first_unit_assigned"), 
                             ("call_received", "first_unit_assigned"),
                             ("first_unit_assigned", "first_unit_enroute"), ("first_unit_enroute", "first_unit_onscene"),
-                            ("first_unit_tohospital", "first_unit_athospital"),
+                            ("first_unit_onscene", "first_unit_tohospital"), ("first_unit_tohospital", "first_unit_athospital"),
                             ("first_unit_athospital", "incident_closed"),("first_unit_onscene", "incident_closed")]
 
         self.name = data_name
@@ -26,6 +26,7 @@ class Summary_Statistics():
         self.source_map = json.loads(self.source_df.to_json(orient='records'))[0]
         self.unique_id = self.source_map['unique_id']
         self.call_type_field = self.source_map['call_type_field']
+        self.population = self.source_map['Estimated Population']
         self.priority_type_field = self.source_map['priority_type_field']
         if self.source_map['Dtype'] is not None:
             self.dtype = json.loads(self.source_map['Dtype'])
@@ -49,7 +50,7 @@ class Summary_Statistics():
         df = df.compute()
         return len(df[self.unique_id].unique())
 
-    def calculate_unique_incident_types_and_counts(self):
+    def calculate_unique_incident_types_and_counts(self, no_unique):
         inc_type_stats = {}
         if self.call_type_field is not None and self.priority_type_field is not None:
             inc_closed_field = self.source_map['incident_closed']
@@ -66,11 +67,14 @@ class Summary_Statistics():
             df[inc_closed_field] = pd.to_datetime(df[inc_closed_field], errors="coerce", infer_datetime_format=True)
             df.index = df[inc_closed_field]
             num_days = len(df.index.normalize().unique())
-            for call_type in tqdm_notebook(different_call_types):
-                filtered = len(df[df[self.call_type_field]== call_type][self.unique_id].unique())
-                per_day_avg = filtered/num_days
-                interval_stats = self.calculate_average_event_intervals_call_type(call_type)
-                stats[call_type] = {"day_avg": per_day_avg, "interval_stats":interval_stats} 
+            if no_unique is False:
+                for call_type in tqdm_notebook(different_call_types):
+                    filtered = len(df[df[self.call_type_field]== call_type][self.unique_id].unique())
+                    per_day_avg = filtered/num_days
+                    interval_stats = self.calculate_average_event_intervals_call_type(call_type)
+                    stats[call_type] = {"day_avg": per_day_avg, "interval_stats":interval_stats} 
+            else:
+                stats = {c:None for c in different_call_types}
             return stats, different_priority_types 
         else:
             return None, None 
@@ -137,10 +141,17 @@ class Summary_Statistics():
                 interval_stats["{}-{}".format(start_event, end_event)] = avg
         return interval_stats
 
-    def write_statistics(self, stats_file="/home/blakemoss/911_modeling/summary_stats.csv"):
+    def return_population_comparisions(self):
         avg_events = self.calculate_average_events_per_day()
         interval_events = self.calculate_average_event_intervals()
         uniq_incs, priorities = self.calculate_unique_incident_types_and_counts()
+        return {"population":self.population, "avg_events":avg_events, "avg_interval":interval_events, 
+                "num_types": len(list(uniq_incs.keys()))}
+ 
+    def write_statistics(self, stats_file="/home/blakemoss/911_modeling/summary_stats.csv", no_unique=False):
+        avg_events = self.calculate_average_events_per_day()
+        interval_events = self.calculate_average_event_intervals()
+        uniq_incs, priorities = self.calculate_unique_incident_types_and_counts(no_unique)
         start, end = self.calculate_start_end_dates()
         uniq_events = self.calculate_unique_events()
         data_set = self.source_map['Dataset']
@@ -168,7 +179,7 @@ class Summary_Statistics():
         else:
             uniq_types = "Classifications not Recorded"
 
-        row = [data_set, service_type, date_range, uniq_events, call_rec, entrd_cad, first_unit_asgnd, 
+        row = [data_set, self.population, service_type, date_range, uniq_events, call_rec, entrd_cad, first_unit_asgnd, 
                first_unit_enrt, first_unit_onscene, first_unit_tohospital, first_unit_athospital, inc_closed,
                call_recv_to_entered, entrd_asgnd, call_rcv_to_asgnd, unit_asgnd_enrt, enrt_onscene, tohos_athos,
                at_hos_inc_closed, on_scn_closed, uniq_types, priorities]
@@ -177,7 +188,8 @@ class Summary_Statistics():
         with open(stats_file, 'a+') as f:
             writer = csv.writer(f)
             if new_file is False:
-                first_row = ["Dataset", "Type", "Date Range", "Number of Unique Non Officer-Initiated Incidents (Calls)",
+                first_row = ["Dataset", "Estimated Jurisdiction Population", "Type", "Date Range", 
+                             "Number of Unique Non Officer-Initiated Incidents (Calls)",
                          "Avg Call Received Event Per Day", "Avg Incident Entered into CAD Events Per Day", 
                          "Avg First Unit Assigned to Dispatch Events Per Day", "Avg First Unit Enroute to Incident Events Per Day", 
                          "Avg First Unit Arrives on Scene Events Per Day", "Avg First Unit Enroute to Hospital Events Per Day", 
@@ -194,7 +206,7 @@ class Summary_Statistics():
                 writer.writerow(first_row)
             writer.writerow(row)
 
-        if uniq_incs is not None:
+        if uniq_incs is not None and no_unique is False:
             type_count_file_name = "{}_call_type_counts.csv".format(data_set.replace(".csv",""))
             with open(type_count_file_name, 'w') as f:
                 writer = csv.writer(f)
